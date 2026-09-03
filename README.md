@@ -5,20 +5,26 @@ kept out of core per the [maintainer standalone-plugin
 policy](https://github.com/NousResearch/hermes-agent/issues/5257#issuecomment-5088843393)
 (the same policy that closed [#5258](https://github.com/NousResearch/hermes-agent/pull/5258)).
 
-Hermes core ships the generic ACP client (`agent/acp_client.py`), the agent
-registry mechanism (`agent/acp_agent_registry.py`), and one built-in agent
-(`copilot`, predating this registry). Every other agent — including the ones
-in this repo — is a plugin: a `providers/<name>-acp/__init__.py` that calls
-`register_acp_agent()` (how to launch the agent's ACP adapter) and
-`register_provider()` (the Hermes provider profile: display name, picker
-grouping, fallback model hint). Core's auto-derivation (`hermes_cli/auth.py`,
-`hermes_cli/models.py`, `hermes_cli/providers.py`) does the rest — no core
-edits needed to add an agent.
+Since hermes-agent [#101456](https://github.com/NousResearch/hermes-agent/pull/101456)
+(part 2 of the #74743 split), an external-process provider needs **zero core
+edits**: each `providers/<name>-acp/` package here is a
+`ProviderProfile` subclass that describes its launch through the
+`process_command` / `process_args` / `process_command_env_vars` /
+`process_args_env_var` fields and supplies its client through
+`ProviderProfile.create_client()`. The generalized ACP client (originally
+proposed for core in [#68222](https://github.com/NousResearch/hermes-agent/pull/68222),
+closed in favour of this seam) is **vendored** into each package
+(`acp_client.py` + `acp_agent_registry.py`) — line-delimited JSON-RPC over
+stdio, `session/set_config_option` model selection with confirmed read-back,
+tool-call bridging, and the `HERMES_SKIP_TRANSPORT_WRAP` /
+`HERMES_SKIP_ASYNC_WRAP` flags the auxiliary client (compression, vision)
+honours.
 
-See [NousResearch/hermes-agent#68222](https://github.com/NousResearch/hermes-agent/pull/68222)
-for the core PR this repo depends on, and issue
-[#5257](https://github.com/NousResearch/hermes-agent/issues/5257) for the
-original generalized-ACP-client proposal.
+Requires a Hermes build that includes #101456 (≥ 2026-09-02 main). For the
+history: issue [#5257](https://github.com/NousResearch/hermes-agent/issues/5257)
+was the original generalized-ACP-client proposal, PR #68222 its core
+implementation, and the maintainer's closing note on #68222 the invitation
+this re-ship answers.
 
 ## Install
 

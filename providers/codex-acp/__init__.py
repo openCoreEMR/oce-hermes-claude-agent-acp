@@ -1,36 +1,53 @@
-"""Codex CLI ACP provider profile + agent registration.
+"""Codex CLI ACP provider — standalone plugin against the core client seam.
 
-Drives Codex CLI through its official ACP adapter
-(@zed-industries/codex-acp) as an external subprocess. Routing happens in
-Hermes core's agent/acp_client.py via the acp://codex base URL; this
-plugin only supplies the launch command (register_acp_agent) and the
-provider profile (register_provider) core's generic derivation needs to
-surface codex-acp in PROVIDER_REGISTRY, the CLI --provider flag,
-CANONICAL_PROVIDERS, and the setup wizard / /model pickers.
-
-Verification status: reaches session/new and authenticates against a real
-Codex CLI login — not yet exercised end-to-end with tool calls. See the
-README table; help welcome closing that gap.
+Drives the Codex CLI through its ACP adapter (@zed-industries/codex-acp) as
+an external subprocess. Same architecture as the sibling ``claude-acp``
+plugin: the generalized ACP client is vendored (``acp_client.py``) and
+supplied through ``ProviderProfile.create_client()`` (Hermes #101456 seam);
+see that plugin's docstring for the full rationale, including why the
+launch command is pre-resolved at import time.
 """
+
+import shutil
 
 from providers import register_provider
 from providers.base import ProviderProfile
 
-from agent.acp_agent_registry import ACPAgentEntry, register_acp_agent
+from .acp_agent_registry import ACPAgentEntry, register_acp_agent
+
+_COMMAND_CANDIDATES = ("codex-acp",)
+
+_INSTALL_HINT = (
+    "Install the official adapter: npm install -g @zed-industries/codex-acp "
+    "(requires Codex CLI login or OPENAI_API_KEY), or point "
+    "HERMES_CODEX_ACP_COMMAND at the binary."
+)
+
+
+def _resolve_default_command() -> str:
+    for name in _COMMAND_CANDIDATES:
+        found = shutil.which(name)
+        if found:
+            return found
+    return _COMMAND_CANDIDATES[0]
+
 
 register_acp_agent("codex", ACPAgentEntry(
-    command="codex-acp",
+    command=_resolve_default_command(),
     display_name="Codex CLI",
-    install_hint=(
-        "Install the official adapter: "
-        "npm install -g @zed-industries/codex-acp "
-        "(requires Codex CLI login or OPENAI_API_KEY)."
-    ),
+    install_hint=_INSTALL_HINT,
+    legacy_command_env_vars=("HERMES_CODEX_ACP_COMMAND",),
+    legacy_args_env_var="HERMES_CODEX_ACP_ARGS",
 ))
 
 
-class ACPSubprocessProfile(ProviderProfile):
+class CodexACPProfile(ProviderProfile):
     """Codex CLI ACP — external process, no REST models endpoint."""
+
+    def create_client(self, **client_kwargs):
+        from .acp_client import ACPClient
+
+        return ACPClient(agent_name="codex", **client_kwargs)
 
     def fetch_models(
         self,
@@ -43,7 +60,7 @@ class ACPSubprocessProfile(ProviderProfile):
         return None
 
 
-codex_acp = ACPSubprocessProfile(
+codex_acp = CodexACPProfile(
     name="codex-acp",
     aliases=("codex-acp-agent",),
     api_mode="chat_completions",  # ACP subprocess uses chat_completions routing
@@ -52,10 +69,11 @@ codex_acp = ACPSubprocessProfile(
     env_vars=("CODEX_ACP_BASE_URL",),  # credentials are managed by Codex CLI's own login
     base_url="acp://codex",  # ACP internal scheme
     auth_type="external_process",
+    process_command=_resolve_default_command(),
+    process_args=(),  # the adapter speaks ACP over stdio with no extra flags
+    process_command_env_vars=("HERMES_CODEX_ACP_COMMAND",),
+    process_args_env_var="HERMES_CODEX_ACP_ARGS",
     fallback_models=("codex-acp",),
-    # Folds under the built-in "OpenAI" picker row alongside openai-codex /
-    # openai-api — see hermes_cli.models.PROVIDER_GROUPS.
-    picker_group="openai",
 )
 
 register_provider(codex_acp)
