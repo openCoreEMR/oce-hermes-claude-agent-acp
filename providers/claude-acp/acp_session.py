@@ -650,6 +650,7 @@ class AdapterSession:
         return str(Path(self._env_home or "~/.claude", "projects", slug, f"{self.acp_id}.jsonl"))
 
     def _last_transcript_text(self) -> str:
+        """The start of Claude Code's last message: its text, or the tool call it was running."""
         try:
             lines = Path(self._transcript_path()).read_text(encoding="utf-8").splitlines()
         except OSError:
@@ -659,17 +660,23 @@ class AdapterSession:
                 row = json.loads(line)
             except ValueError:
                 continue
-            if row.get("type") == "assistant":
-                text = render_content((row.get("message") or {}).get("content"))
-                if text:
-                    return text
+            if row.get("type") != "assistant":
+                continue
+            content = (row.get("message") or {}).get("content")
+            text = render_content(content)
+            if text:
+                return text
+            for block in content if isinstance(content, list) else ():
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    return f"{block.get('name')}: {json.dumps(block.get('input'))}"
         return ""
 
     def _report(self, why: str, turn: Turn | None = None) -> str:
         """Hermes's chat shows only this error, so it says where the work is and how far it got."""
         text = "".join(turn.text_parts).strip() if turn is not None else ""
         quote = " ".join((text or self._last_transcript_text()).split())[:_REPORT_QUOTE_CHARS]
-        return f"{why} Transcript: {self._transcript_path()} Last message: {quote or '(none)'}"
+        # Hermes's own row for a failed turn says the request was not processed, which is not so here.
+        return f"{why} Some actions may already have run. Transcript: {self._transcript_path()} Last message: {quote or '(none)'}"
 
 
 class _Registry:

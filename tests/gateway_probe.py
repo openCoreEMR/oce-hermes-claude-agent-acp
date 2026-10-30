@@ -298,9 +298,11 @@ async def cards(client, args):
 
 async def memory(client, args):
     """Condition 6: a memory write the developer asks for is a Hermes `memory` tool call."""
+    # A fresh value each time: Claude Code rightly skips a fact already in memory.
+    run = time.time_ns()
     for index in range(args.tries):
         session = await open_session(client)
-        result = await session.turn(f"Save to your memory, with your memory tool, this fact: probe value {index} is {index * 7}.")
+        result = await session.turn(f"Save to your memory, with your memory tool, this fact: probe {run}-{index} is {index * 7}.")
         emit(step="c6-memory", index=index, result=result, tools=[row[1] for row in session.rows() if row[1]])
 
 

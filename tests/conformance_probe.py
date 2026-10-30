@@ -375,6 +375,8 @@ def main():
     os.environ.update({
         "HOME": str(home),
         "HERMES_HOME": str(home / "hermes"),
+        # The agent image limits Hermes's writes to /opt/data. The probe's files live here.
+        "HERMES_WRITE_SAFE_ROOT": str(root.resolve()),
         "OCE_CLAUDE_ACP_USE_LOGIN": "1",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     })

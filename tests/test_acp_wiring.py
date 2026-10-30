@@ -318,6 +318,21 @@ def test_cancel_ends_what_the_turn_started_and_spares_claude_code(harness):
     assert direct.is_running()
 
 
+def test_a_report_quotes_the_running_tool_call_when_there_is_no_text(harness, tmp_path):
+    client = harness.client()
+    thread, outcome = _turn_in_thread(harness, client, "HANG")
+    _wait_for_prompt(harness)
+    session = harness.session_mod.REGISTRY.get("hermes-session-1", None)
+    transcript = Path(session._transcript_path())
+    transcript.parent.mkdir(parents=True)
+    block = {"type": "tool_use", "name": "Bash", "input": {"command": "make test"}}
+    transcript.write_text(json.dumps({"type": "assistant", "message": {"content": [block]}}) + "\n")
+    client.cancel()
+    thread.join(5)
+    assert "Last message: Bash:" in str(outcome["error"])
+    assert "make test" in str(outcome["error"])
+
+
 def test_a_timeout_cancels_and_raises_without_a_retry(harness):
     with pytest.raises(harness.session_mod.ACPTurnError, match="stopped after 1 s"):
         harness.turn("HANG", timeout=1)
