@@ -73,6 +73,20 @@ register_acp_agent("claude", ACPAgentEntry(
 ))
 
 
+def _classify_api_error(error, **_):
+    """Decide Hermes's next step for this provider's failures.
+
+    Once ``session/prompt`` is on the wire, Claude Code may have acted, so
+    neither a retry nor a fallback provider may repeat the turn. Anything else
+    keeps Hermes's own classification: nothing has started.
+    """
+    if getattr(error, "acp_prompt_sent", False):
+        return {"reason": "unknown", "retryable": False, "should_fallback": False}
+    if getattr(error, "acp_model_refused", False):
+        return {"reason": "model_not_found", "retryable": False, "should_fallback": False}
+    return None
+
+
 class ClaudeACPProfile(ProviderProfile):
     """Claude Code ACP — external process, no REST models endpoint."""
 
@@ -114,12 +128,16 @@ claude_acp = ClaudeACPProfile(
     process_args=(),  # the adapter speaks ACP over stdio with no extra flags
     process_command_env_vars=("HERMES_CLAUDE_ACP_COMMAND",),
     process_args_env_var="HERMES_CLAUDE_ACP_ARGS",
-    # Versioned model ids in preferred picker order; the vendored client maps
-    # each onto the adapter's ACP "model" config option via
-    # session/set_config_option, so the picker choice genuinely switches the
-    # serving model. The legacy "claude-acp" id still resolves
-    # (adapter-default sentinel) but is no longer listed.
-    fallback_models=("fable-5", "opus-5", "sonnet-5", "haiku-4.5"),
+    # The adapter's own option values. The client matches these exactly, so a
+    # new or renamed model fails loudly until this list and the pin move with it.
+    fallback_models=(
+        "claude-sonnet-5-5",
+        "claude-sonnet-5-5[1m]",
+        "claude-opus-5-5",
+        "claude-opus-5-5[1m]",
+        "claude-fable-5-1[1m]",
+    ),
+    classify_api_error=_classify_api_error,
 )
 
 register_provider(claude_acp)
