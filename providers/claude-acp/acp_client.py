@@ -105,11 +105,35 @@ def _resolve_home_dir() -> str:
     return "/tmp"
 
 
+# Where the pod mounts the Claude Code plan token. It sits outside Hermes's
+# model-key mount so no Hermes process ever loads it; only the adapter's
+# environment gets it.
+_TOKEN_FILE_DEFAULT = "/var/run/secrets/hermes-claude/CLAUDE_CODE_OAUTH_TOKEN"
+_TOKEN_FILE_ENV = "OCE_CLAUDE_ACP_TOKEN_FILE"
+# Local runs on a developer's machine sign in with that machine's login.
+_USE_LOGIN_ENV = "OCE_CLAUDE_ACP_USE_LOGIN"
+# Claude Code prefers each of these to CLAUDE_CODE_OAUTH_TOKEN.
+_CREDENTIAL_SWITCHES = ("CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_FOUNDRY")
+
+
+def _read_plan_token() -> str | None:
+    """The plan token for the adapter, or None when this run uses the machine's login."""
+    if os.environ.get(_USE_LOGIN_ENV):
+        return None
+    path = Path(os.environ.get(_TOKEN_FILE_ENV) or _TOKEN_FILE_DEFAULT)
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"Cannot read the Claude Code plan token at {path}: {exc.strerror}") from exc
+    if not token:
+        raise RuntimeError(f"The Claude Code plan token at {path} is empty.")
+    return token
+
+
 def _build_subprocess_env(env_unset: tuple[str, ...] = ()) -> dict[str, str]:
-    # ACP agents are model-driving CLI executors: they legitimately need LLM
-    # provider credentials. Route through the central helper so Tier-1 secrets
-    # (gateway bot tokens, GitHub auth, infra) are still stripped (#29157).
-    env = hermes_subprocess_env(inherit_credentials=True)
+    # The adapter bills on the developer's plan, so it inherits no provider
+    # credentials: the helper strips those and Tier-1 secrets alike.
+    env = hermes_subprocess_env(inherit_credentials=False)
     home = _resolve_home_dir()
     env["HOME"] = home
     from hermes_constants import apply_subprocess_home_env
@@ -119,6 +143,14 @@ def _build_subprocess_env(env_unset: tuple[str, ...] = ()) -> dict[str, str]:
     # entry so this stays agent-agnostic.
     for marker in env_unset:
         env.pop(marker, None)
+    for name in tuple(env):
+        if name.startswith("ANTHROPIC_") or name in _CREDENTIAL_SWITCHES:
+            del env[name]
+    token = _read_plan_token()
+    if token is None:
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    else:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = token
     return env
 
 
