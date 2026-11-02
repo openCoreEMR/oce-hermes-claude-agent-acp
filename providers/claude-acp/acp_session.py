@@ -48,6 +48,17 @@ from .acp_gate import GATED_TOOLS, permission_outcome
 
 logger = logging.getLogger(__name__)
 
+
+def _env_number(name: str, default: float, cast: Callable[[str], float]) -> float:
+    """A numeric override from the environment; a bad value must not break every chat call at import."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        return cast(raw) if raw else default
+    except ValueError:
+        logger.warning("claude-acp ignoring invalid %s=%r; using %s", name, raw, default)
+        return default
+
+
 _CONTROL_TIMEOUT_SECONDS = 30.0
 _SESSION_TIMEOUT_SECONDS = 120.0
 _TURN_LOCK_TIMEOUT_SECONDS = 30.0
@@ -58,8 +69,8 @@ _KILL_AFTER_SECONDS = 8.0
 _SETTLE_WAIT_SECONDS = 10.0
 _REPLAY_DROP_SECONDS = 1.0
 _BETWEEN_TURN_QUIET_SECONDS = 3.0
-_IDLE_SECONDS = float(os.environ.get("OCE_CLAUDE_ACP_IDLE_SECONDS") or 1800)
-_MAX_SESSIONS = int(os.environ.get("OCE_CLAUDE_ACP_MAX_SESSIONS") or 8)
+_IDLE_SECONDS = float(_env_number("OCE_CLAUDE_ACP_IDLE_SECONDS", 1800.0, float))
+_MAX_SESSIONS = int(_env_number("OCE_CLAUDE_ACP_MAX_SESSIONS", 8, int))
 # Hermes shows at most 300 to 500 characters of a provider's error.
 _REPORT_QUOTE_CHARS = 140
 _MAX_TOOL_NAMES = 512
@@ -180,7 +191,17 @@ class AdapterSession:
             return
         state = {"acp_id": self.acp_id, "synced": self.synced, "awaiting_reply": self._awaiting_reply}
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
-        self._state_file.write_text(json.dumps(state), encoding="utf-8")
+        # A torn file would read as no state, and the next turn would resend this one.
+        partial = self._state_file.with_name(f"{self._state_file.name}.{os.getpid()}.tmp")
+        partial.write_text(json.dumps(state), encoding="utf-8")
+        os.replace(partial, self._state_file)
+
+    def _persist_sent(self, turn: Turn) -> None:
+        """Persist once the prompt is on the wire, where a plain error would let Hermes repeat the turn."""
+        try:
+            self._persist()
+        except OSError as exc:
+            raise ACPTurnError(self._report(f"Could not save the session state: {exc}.", turn)) from exc
 
     # --- the adapter process
 
@@ -603,7 +624,7 @@ class AdapterSession:
                     # Claude Code cannot continue this session. The next turn starts another.
                     self.acp_id = None
                     self.synced = None
-                    self._persist()
+                    self._persist_sent(turn)
                 raise ACPTurnError(self._report(f"Claude Code failed: {detail[:120]}.", turn))
             return message.get("result") or {}
 
@@ -614,7 +635,7 @@ class AdapterSession:
         tool_calls, text = extract_tool_calls("".join(turn.text_parts))
         self.synced = [*(self.synced or ()), reply_digest(tool_calls)]
         self._awaiting_reply = False
-        self._persist()
+        self._persist_sent(turn)
         usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
         prompt_tokens = sum(int(usage.get(key) or 0) for key in ("inputTokens", "cachedReadTokens", "cachedWriteTokens"))
         return TurnResult(

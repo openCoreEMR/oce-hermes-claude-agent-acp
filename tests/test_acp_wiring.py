@@ -415,6 +415,44 @@ def test_a_new_process_resumes_from_the_persisted_session(harness):
     assert harness.prompts() == ["first", "second"]
 
 
+def _fail_state_writes(monkeypatch, *failing_calls):
+    """Make the given state writes fail, counting from 1, and keep the others real."""
+    real = os.replace
+    calls = []
+
+    def replace(source, target):
+        calls.append(target)
+        if len(calls) in failing_calls:
+            raise OSError("No space left on device")
+        real(source, target)
+
+    monkeypatch.setattr(os, "replace", replace)
+    return calls
+
+
+def test_a_state_write_that_fails_after_the_prompt_is_not_retryable(harness, monkeypatch):
+    harness.turn("first")
+    calls = _fail_state_writes(monkeypatch, 2)
+    with pytest.raises(harness.session_mod.ACPTurnError) as caught:
+        harness.turn("second")
+    assert harness.plugin._classify_api_error(caught.value)["should_fallback"] is False
+    assert json.loads(calls[0].read_text())["awaiting_reply"] is True
+
+
+def test_a_state_write_that_fails_before_the_prompt_sends_nothing(harness, monkeypatch):
+    harness.turn("first")
+    _fail_state_writes(monkeypatch, 1)
+    with pytest.raises(OSError):
+        harness.turn("second")
+    assert harness.prompts() == ["first"]
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("", 8), ("16", 16), ("30m", 8)])
+def test_a_bad_numeric_override_keeps_the_default(harness, monkeypatch, raw, expected):
+    monkeypatch.setenv("OCE_TEST_NUMBER", raw)
+    assert harness.session_mod._env_number("OCE_TEST_NUMBER", 8, int) == expected
+
+
 def test_a_deleted_cwd_falls_back_to_hermes_home(harness, tmp_path):
     client = harness.client()
     client._acp_cwd = str(tmp_path / "gone")

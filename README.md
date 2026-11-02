@@ -29,8 +29,8 @@ this re-ship answers.
 ## Install
 
 ```bash
-git clone https://github.com/mvdbastos/hermes-acp-agents
-cd hermes-acp-agents
+git clone https://github.com/openCoreEMR/oce-hermes-claude-agent-acp
+cd oce-hermes-claude-agent-acp
 ./install.sh            # copies providers/*/ into $HERMES_HOME/plugins/model-providers/
 ./install.sh --link      # symlink instead, for tracking repo updates in place
 ```
