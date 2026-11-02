@@ -374,6 +374,20 @@ def test_a_torn_transcript_does_not_break_the_report(harness):
     assert "Last message: kept" in session._report("Claude Code was stopped.")
 
 
+def test_a_deeply_nested_transcript_row_does_not_break_the_report(harness):
+    harness.turn("first")
+    session = harness.session_mod.REGISTRY.get("hermes-session-1", None)
+    transcript = Path(session._transcript_path())
+    transcript.parent.mkdir(parents=True)
+    good = {"type": "assistant", "message": {"content": [{"type": "text", "text": "kept"}]}}
+    nested = "[" * 200_000 + "]" * 200_000
+    with pytest.raises(RecursionError):
+        json.loads(nested)
+    row = f'{{"type": "assistant", "message": {{"content": [{{"type": "tool_use", "name": "Bash", "input": {nested}}}]}}}}'
+    transcript.write_text(f"{json.dumps(good)}\n{row}\n", encoding="utf-8")
+    assert "Last message: kept" in session._report("Claude Code was stopped.")
+
+
 def test_a_timeout_cancels_and_raises_without_a_retry(harness):
     with pytest.raises(harness.session_mod.ACPTurnError, match="stopped after 1 s"):
         harness.turn("HANG", timeout=1)

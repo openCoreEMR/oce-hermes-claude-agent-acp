@@ -179,7 +179,7 @@ class AdapterSession:
             return
         try:
             state = json.loads(self._state_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             logger.warning("claude-acp ignoring unreadable session state at %s", self._state_file)
             return
         self.acp_id = state.get("acp_id")
@@ -252,7 +252,7 @@ class AdapterSession:
         for line in proc.stdout or ():
             try:
                 message = json.loads(line)
-            except ValueError:
+            except (ValueError, RecursionError):
                 continue
             if isinstance(message, dict):
                 self._route(message)
@@ -710,19 +710,26 @@ class AdapterSession:
             return ""
         for line in reversed(lines):
             try:
-                row = json.loads(line)
-            except ValueError:
+                text = self._transcript_row_text(line)
+            except (ValueError, RecursionError):
                 continue
-            if not isinstance(row, dict) or row.get("type") != "assistant":
-                continue
-            message = row.get("message")
-            content = message.get("content") if isinstance(message, dict) else None
-            text = render_content(content)
             if text:
                 return text
-            for block in content if isinstance(content, list) else ():
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    return f"{block.get('name')}: {json.dumps(block.get('input'))}"
+        return ""
+
+    @staticmethod
+    def _transcript_row_text(line: str) -> str:
+        row = json.loads(line)
+        if not isinstance(row, dict) or row.get("type") != "assistant":
+            return ""
+        message = row.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        text = render_content(content)
+        if text:
+            return text
+        for block in content if isinstance(content, list) else ():
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                return f"{block.get('name')}: {json.dumps(block.get('input'))}"
         return ""
 
     def _report(self, why: str, turn: Turn | None = None) -> str:
