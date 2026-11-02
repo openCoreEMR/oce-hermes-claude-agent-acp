@@ -154,15 +154,15 @@ def extract_tool_calls(text: str) -> tuple[list[ChatCompletionMessageToolCall], 
     extracted: list[ChatCompletionMessageToolCall] = []
     consumed_spans: list[tuple[int, int]] = []
 
-    def try_add(raw_json: str) -> None:
+    def try_add(raw_json: str) -> bool:
         try:
             obj = json.loads(raw_json)
         except ValueError:
-            return
+            return False
         fn = obj.get("function") if isinstance(obj, dict) else None
         fn_name = fn.get("name") if isinstance(fn, dict) else None
         if not isinstance(fn_name, str) or not fn_name.strip():
-            return
+            return False
         fn_args = fn.get("arguments", "{}")
         if not isinstance(fn_args, str):
             fn_args = json.dumps(fn_args, ensure_ascii=False)
@@ -170,16 +170,18 @@ def extract_tool_calls(text: str) -> tuple[list[ChatCompletionMessageToolCall], 
         if not isinstance(call_id, str) or not call_id.strip():
             call_id = f"acp_call_{len(extracted) + 1}"
         extracted.append(_build_tool_call(call_id=call_id, name=fn_name.strip(), arguments=fn_args))
+        return True
 
+    # A rejected block stays in the reply, where Hermes and the user can see it.
     for match in _TOOL_CALL_BLOCK_RE.finditer(text):
-        try_add(match.group(1))
-        consumed_spans.append(match.span())
+        if try_add(match.group(1)):
+            consumed_spans.append(match.span())
 
     # Only try the bare-JSON fallback when no XML blocks were found.
     if not extracted:
         for match in _TOOL_CALL_JSON_RE.finditer(text):
-            try_add(match.group(0))
-            consumed_spans.append(match.span())
+            if try_add(match.group(0)):
+                consumed_spans.append(match.span())
 
     if not consumed_spans:
         return extracted, text.strip()

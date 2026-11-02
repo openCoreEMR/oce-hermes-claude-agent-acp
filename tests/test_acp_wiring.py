@@ -445,6 +445,15 @@ def test_a_state_write_that_fails_before_the_prompt_sends_nothing(harness, monke
     with pytest.raises(OSError):
         harness.turn("second")
     assert harness.prompts() == ["first"]
+    harness.turn("third")
+    assert "second" in harness.prompts()[-1]
+
+
+@pytest.mark.parametrize("block", ["<tool_call>{not json</tool_call>", '<tool_call>{"function": {}}</tool_call>'])
+def test_a_tool_call_block_that_does_not_parse_stays_in_the_reply(harness, block):
+    calls, text = sys.modules[harness.session_mod.__package__ + ".acp_format"].extract_tool_calls(f"before {block} after")
+    assert calls == []
+    assert block in text
 
 
 @pytest.mark.parametrize(("raw", "expected"), [("", 8), ("16", 16), ("30m", 8)])

@@ -36,7 +36,8 @@ _INSTALL_HINT = (
     "npm install -g @agentclientprotocol/claude-agent-acp "
     "(the older @zed-industries/claude-code-acp bin also works), or point "
     "HERMES_CLAUDE_ACP_COMMAND at the binary. "
-    "Requires Claude Code CLI credentials or ANTHROPIC_API_KEY."
+    "Requires a Claude Code plan token file (OCE_CLAUDE_ACP_TOKEN_FILE) or, "
+    "with OCE_CLAUDE_ACP_USE_LOGIN set, the machine's Claude Code login."
 )
 
 

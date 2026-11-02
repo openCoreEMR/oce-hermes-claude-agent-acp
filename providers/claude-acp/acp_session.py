@@ -585,9 +585,15 @@ class AdapterSession:
             if turn.canceled.is_set():
                 raise RuntimeError("The turn was stopped before its prompt was sent.")
             # Seen from this moment: a retry of these messages must find nothing to send.
+            previous = (self.synced, self._awaiting_reply)
             self.synced = digests
             self._awaiting_reply = True
-            self._persist()
+            try:
+                self._persist()
+            except OSError:
+                # Nothing is on the wire yet: the next call must send this prompt.
+                self.synced, self._awaiting_reply = previous
+                raise
             turn.session = self
             turn.prompt_sent = True
             turn.started_at = time.time()
