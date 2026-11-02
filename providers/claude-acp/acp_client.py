@@ -21,6 +21,7 @@ from .acp_agent_registry import (
     normalize_agent_name,
     resolve_agent_launch,
 )
+from .acp_models import pin_available_models
 from .acp_session import REGISTRY, AdapterSession, Launch, Turn, TurnResult
 from agent.runtime_cwd import resolve_agent_cwd
 from tools.environments.local import hermes_subprocess_env
@@ -117,6 +118,7 @@ def _build_subprocess_env(env_unset: tuple[str, ...] = ()) -> dict[str, str]:
         env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     else:
         env["CLAUDE_CODE_OAUTH_TOKEN"] = token
+        pin_available_models(env.get("CLAUDE_CONFIG_DIR") or Path(env["HOME"]) / ".claude")
     return env
 
 

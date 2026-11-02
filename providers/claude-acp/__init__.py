@@ -25,6 +25,7 @@ from providers import register_provider
 from providers.base import ProviderProfile
 
 from .acp_agent_registry import ACPAgentEntry, register_acp_agent
+from .acp_models import MODELS
 
 _COMMAND_CANDIDATES = (
     "claude-agent-acp",  # maintained: @agentclientprotocol/claude-agent-acp
@@ -131,13 +132,7 @@ claude_acp = ClaudeACPProfile(
     process_args_env_var="HERMES_CLAUDE_ACP_ARGS",
     # The adapter's own option values. The client matches these exactly, so a
     # new or renamed model fails loudly until this list and the pin move with it.
-    fallback_models=(
-        "claude-sonnet-5-5",
-        "claude-sonnet-5-5[1m]",
-        "claude-opus-5-5",
-        "claude-opus-5-5[1m]",
-        "claude-fable-5-1[1m]",
-    ),
+    fallback_models=MODELS,
     classify_api_error=_classify_api_error,
 )
 

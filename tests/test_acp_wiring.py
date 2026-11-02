@@ -559,3 +559,48 @@ def test_gate_refuses_a_tool_with_no_guard_such_as_mcp(harness):
 
 def test_gate_refuses_a_request_that_carries_no_command(harness):
     assert _permission(harness, {"name": "Bash"})["optionId"] == "reject"
+
+
+def _token_env(harness, monkeypatch, config_dir):
+    token = harness.tmp_path / "token"
+    token.write_text("plan-token\n")
+    monkeypatch.delenv("OCE_CLAUDE_ACP_USE_LOGIN", raising=False)
+    monkeypatch.setenv("OCE_CLAUDE_ACP_TOKEN_FILE", str(token))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+    return harness.client_mod._build_subprocess_env()
+
+
+def test_a_token_session_pins_the_exact_ids_and_keeps_other_settings(harness, monkeypatch, tmp_path):
+    settings = tmp_path / "claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"theme": "dark", "availableModels": ["sonnet"]}))
+    env = _token_env(harness, monkeypatch, settings.parent)
+    assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "plan-token"
+    assert json.loads(settings.read_text()) == {"theme": "dark", "availableModels": list(harness.plugin.claude_acp.fallback_models)}
+    assert [path.name for path in settings.parent.iterdir()] == ["settings.json"]
+
+
+def test_a_token_session_creates_the_settings_file_and_leaves_a_pinned_one_alone(harness, monkeypatch, tmp_path):
+    settings = tmp_path / "new" / "claude" / "settings.json"
+    _token_env(harness, monkeypatch, settings.parent)
+    written = settings.stat().st_mtime_ns
+    assert "claude-opus-5-5[1m]" in json.loads(settings.read_text())["availableModels"]
+    _token_env(harness, monkeypatch, settings.parent)
+    assert settings.stat().st_mtime_ns == written
+
+
+@pytest.mark.parametrize("content", ["{torn", "[]"])
+def test_settings_it_cannot_read_stop_the_session_instead_of_being_replaced(harness, monkeypatch, tmp_path, content):
+    settings = tmp_path / "claude" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(content)
+    with pytest.raises(RuntimeError, match="settings"):
+        _token_env(harness, monkeypatch, settings.parent)
+    assert settings.read_text() == content
+
+
+def test_a_login_session_leaves_the_machines_settings_alone(harness, monkeypatch, tmp_path):
+    settings = tmp_path / "claude" / "settings.json"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(settings.parent))
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in harness.client_mod._build_subprocess_env()
+    assert not settings.exists()
