@@ -185,11 +185,15 @@ class AdapterSession:
         self.acp_id = state.get("acp_id")
         self.synced = state.get("synced")
         self._awaiting_reply = bool(state.get("awaiting_reply"))
+        self._specs_digest = str(state.get("specs_digest") or "")
 
     def _persist(self) -> None:
         if self._state_file is None:
             return
-        state = {"acp_id": self.acp_id, "synced": self.synced, "awaiting_reply": self._awaiting_reply}
+        state = {
+            "acp_id": self.acp_id, "synced": self.synced, "awaiting_reply": self._awaiting_reply,
+            "specs_digest": self._specs_digest,
+        }
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         # A torn file would read as no state, and the next turn would resend this one.
         partial = self._state_file.with_name(f"{self._state_file.name}.{os.getpid()}.tmp")
@@ -484,8 +488,10 @@ class AdapterSession:
             if self.acp_id is None:
                 raise RuntimeError("The Claude Code ACP adapter returned no sessionId.")
             self.synced = None
+            self._specs_digest = self._digest_specs(tools)
             resumed = created
-        self._specs_digest = self._digest_specs(tools)
+        # A loaded session keeps its digest: Claude Code can defer a changed system
+        # prompt, so a changed tool list still needs its notice in the next prompt.
         self._capture_model_option(resumed)
         self._set_mode_default()
         # session/load resets the model to the adapter's default, whatever it
@@ -546,7 +552,6 @@ class AdapterSession:
         specs_digest = self._digest_specs(tools)
         if specs_digest != self._specs_digest:
             text = f"{render_tool_spec_notice(tool_specs(tools))}\n\n{text}"
-            self._specs_digest = specs_digest
         return text, digests
 
     # --- a turn
@@ -585,14 +590,15 @@ class AdapterSession:
             if turn.canceled.is_set():
                 raise RuntimeError("The turn was stopped before its prompt was sent.")
             # Seen from this moment: a retry of these messages must find nothing to send.
-            previous = (self.synced, self._awaiting_reply)
+            previous = (self.synced, self._awaiting_reply, self._specs_digest)
             self.synced = digests
             self._awaiting_reply = True
+            self._specs_digest = self._digest_specs(tools)
             try:
                 self._persist()
             except OSError:
                 # Nothing is on the wire yet: the next call must send this prompt.
-                self.synced, self._awaiting_reply = previous
+                self.synced, self._awaiting_reply, self._specs_digest = previous
                 raise
             turn.session = self
             turn.prompt_sent = True

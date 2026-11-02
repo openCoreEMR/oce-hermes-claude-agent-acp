@@ -449,6 +449,26 @@ def test_a_state_write_that_fails_before_the_prompt_sends_nothing(harness, monke
     assert "second" in harness.prompts()[-1]
 
 
+OTHER_TOOLS = [{"type": "function", "function": {"name": "recall", "description": "d", "parameters": {}}}]
+
+
+def test_a_state_write_that_fails_before_the_prompt_keeps_the_tool_notice_for_the_retry(harness, monkeypatch):
+    harness.turn("first")
+    _fail_state_writes(monkeypatch, 1)
+    with pytest.raises(OSError):
+        harness.turn("second", tools=OTHER_TOOLS)
+    harness.turn("third", tools=OTHER_TOOLS)
+    assert "recall" in harness.prompts()[-1]
+
+
+def test_a_loaded_session_still_gets_the_notice_for_a_changed_tool_list(harness):
+    harness.turn("first")
+    harness.session_mod.REGISTRY.close_all()
+    harness.turn("second", tools=OTHER_TOOLS)
+    assert len(harness.requests("session/load")) == 1
+    assert "recall" in harness.prompts()[-1]
+
+
 @pytest.mark.parametrize("block", ["<tool_call>{not json</tool_call>", '<tool_call>{"function": {}}</tool_call>'])
 def test_a_tool_call_block_that_does_not_parse_stays_in_the_reply(harness, block):
     calls, text = sys.modules[harness.session_mod.__package__ + ".acp_format"].extract_tool_calls(f"before {block} after")
