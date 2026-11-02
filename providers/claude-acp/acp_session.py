@@ -699,9 +699,13 @@ class AdapterSession:
         return str(Path(self._env_home or "~/.claude", "projects", slug, f"{self.acp_id}.jsonl"))
 
     def _last_transcript_text(self) -> str:
-        """The start of Claude Code's last message: its text, or the tool call it was running."""
+        """The start of Claude Code's last message: its text, or the tool call it was running.
+
+        It must not raise: a kill can tear the file, and an error here would replace the turn's
+        report with one that lets Hermes repeat the turn.
+        """
         try:
-            lines = Path(self._transcript_path()).read_text(encoding="utf-8").splitlines()
+            lines = Path(self._transcript_path()).read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             return ""
         for line in reversed(lines):
@@ -709,9 +713,10 @@ class AdapterSession:
                 row = json.loads(line)
             except ValueError:
                 continue
-            if row.get("type") != "assistant":
+            if not isinstance(row, dict) or row.get("type") != "assistant":
                 continue
-            content = (row.get("message") or {}).get("content")
+            message = row.get("message")
+            content = message.get("content") if isinstance(message, dict) else None
             text = render_content(content)
             if text:
                 return text

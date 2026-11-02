@@ -362,6 +362,18 @@ def test_a_report_quotes_the_running_tool_call_when_there_is_no_text(harness, tm
     assert "make test" in str(outcome["error"])
 
 
+def test_a_torn_transcript_does_not_break_the_report(harness):
+    harness.turn("first")
+    session = harness.session_mod.REGISTRY.get("hermes-session-1", None)
+    transcript = Path(session._transcript_path())
+    transcript.parent.mkdir(parents=True)
+    good = {"type": "assistant", "message": {"content": [{"type": "text", "text": "kept"}]}}
+    odd = [[1, 2], {"type": "assistant", "message": "text"}, {"type": "assistant"}]
+    rows = [json.dumps(row).encode() for row in (good, *odd)]
+    transcript.write_bytes(b"\n".join(rows) + b'\n{"type": "assistant", "x": "\xe2\x82')
+    assert "Last message: kept" in session._report("Claude Code was stopped.")
+
+
 def test_a_timeout_cancels_and_raises_without_a_retry(harness):
     with pytest.raises(harness.session_mod.ACPTurnError, match="stopped after 1 s"):
         harness.turn("HANG", timeout=1)
