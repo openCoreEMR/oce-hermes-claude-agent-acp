@@ -225,6 +225,35 @@ def test_the_next_turn_after_a_crash_resumes_and_sends_only_itself(harness):
     assert completion.choices[0].message.content == "echo: after"
 
 
+def test_a_failed_setup_loses_the_adapter_and_the_next_turn_resumes(harness, monkeypatch):
+    original = harness.session_mod.AdapterSession._set_mode_default
+    calls = []
+
+    def fail_once(session):
+        calls.append(session.proc)
+        if len(calls) == 1:
+            raise TimeoutError("The adapter did not answer session/set_mode.")
+        original(session)
+
+    monkeypatch.setattr(harness.session_mod.AdapterSession, "_set_mode_default", fail_once)
+    with pytest.raises(TimeoutError):
+        harness.turn("first", model=OPUS_1M)
+    assert calls[0].poll() is not None
+    assert harness.turn("second", model=OPUS_1M).choices[0].message.content.startswith("echo:")
+    assert len(harness.requests("session/load")) == 1
+    assert [row["params"]["value"] for row in harness.requests("session/set_config_option")] == [OPUS_1M]
+
+
+def test_an_adapter_that_answers_during_the_write_still_settles_the_prompt(harness, tmp_path):
+    launch = harness.session_mod.Launch(command=sys.executable, args=(), cwd=str(tmp_path), build_env=dict)
+    session = harness.session_mod.AdapterSession("race", launch)
+    session._write = lambda message: session._route_response({"id": message["id"], "result": {}})
+    session._prompt_settled.clear()
+    session._send_request("session/prompt", {}, is_prompt=True)
+    assert session._prompt_settled.is_set()
+    assert session._open_prompt is None
+
+
 def test_failures_before_the_prompt_keep_hermess_own_classification(harness):
     assert harness.plugin._classify_api_error(RuntimeError("spawn failed")) is None
     verdict = harness.plugin._classify_api_error(harness.session_mod.ACPModelError("no such model"))

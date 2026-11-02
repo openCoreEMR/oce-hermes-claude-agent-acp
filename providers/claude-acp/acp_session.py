@@ -141,6 +141,7 @@ class AdapterSession:
         self._ids = itertools.count(1)
         self._pending: dict[int, queue.SimpleQueue[dict[str, Any]]] = {}
         self._open_prompt: int | None = None
+        self._ready_proc: subprocess.Popen[str] | None = None
         self._prompt_settled = threading.Event()
         self._prompt_settled.set()
         self._turn: Turn | None = None
@@ -282,10 +283,16 @@ class AdapterSession:
         except (BrokenPipeError, ValueError, OSError):
             logger.debug("claude-acp write after the adapter exited")
 
-    def _send_request(self, method: str, params: dict[str, Any]) -> tuple[int, queue.SimpleQueue[dict[str, Any]]]:
+    def _send_request(
+        self, method: str, params: dict[str, Any], *, is_prompt: bool = False,
+    ) -> tuple[int, queue.SimpleQueue[dict[str, Any]]]:
         request_id = next(self._ids)
         reply: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
         self._pending[request_id] = reply
+        if is_prompt:
+            # Before the write: the reader thread can route a fast answer first,
+            # and a prompt it could not match would never settle.
+            self._open_prompt = request_id
         self._write({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
         return request_id, reply
 
@@ -423,8 +430,18 @@ class AdapterSession:
         }
 
     def _ensure_session(self, messages: list[dict[str, Any]], tools: Any) -> None:
-        if self.alive and self.acp_id:
+        # acp_id alone proves nothing: _restore sets it before any adapter runs.
+        if self.alive and self.acp_id and self._ready_proc is self.proc:
             return
+        try:
+            self._open_session(messages, tools)
+        except BaseException:
+            # A half-set-up adapter must not pass for a ready one on the next call.
+            self.kill()
+            raise
+        self._ready_proc = self.proc
+
+    def _open_session(self, messages: list[dict[str, Any]], tools: Any) -> None:
         if not self.alive:
             self._spawn()
         params = {"cwd": self.launch.cwd, "mcpServers": [], "_meta": self._session_meta(messages, tools)}
@@ -557,8 +574,7 @@ class AdapterSession:
             # Replay stragglers end here: what follows is this prompt's reply.
             self._drop_updates_until = 0.0
             self._prompt_settled.clear()
-            request_id, reply = self._send_request("session/prompt", prompt)
-            self._open_prompt = request_id
+            request_id, reply = self._send_request("session/prompt", prompt, is_prompt=True)
         try:
             response = self._await_prompt(turn, reply, timeout)
         finally:

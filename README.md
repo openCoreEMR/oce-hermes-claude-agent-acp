@@ -40,11 +40,11 @@ table below), and restart Hermes.
 
 ## Supported agents
 
+This fork carries only `claude-acp`. It removed the Codex and Copilot providers, which it does not run. [Upstream](https://github.com/mvdbastos/hermes-acp-agents) still has them.
+
 | Provider | Ships | Spawns | Requires | Status |
 |----------|-------|--------|----------|--------|
-| `copilot-acp` | this repo (core also bundles it) | `copilot --acp --stdio` | GitHub Copilot CLI + `copilot login` | Maintained in Hermes core; copy here for older installs |
 | `claude-acp` | this repo | `claude-agent-acp` (falls back to `claude-code-acp`) | `npm i -g @agentclientprotocol/claude-agent-acp` + a Claude Code plan token or login | **E2E verified** — real gateway traffic and Hermes's approval guards; see [How `claude-acp` runs](#how-claude-acp-runs) |
-| `codex-acp` | this repo | `codex-acp` | `npm i -g @zed-industries/codex-acp` + Codex CLI login (or `OPENAI_API_KEY`) | Reaches `session/new`, authenticates — not yet exercised with tool calls end-to-end |
 
 ## Wanted
 
