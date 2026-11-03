@@ -364,17 +364,21 @@ def test_a_tool_call_claude_code_starts_after_a_stop_is_refused_until_the_next_p
 
 def test_a_tool_call_the_gate_allows_while_the_turn_is_stopped_is_refused(harness, monkeypatch):
     allowed = harness.session_mod.permission_outcome
+    deciding = threading.Event()
+    stopped = threading.Event()
 
     def slow(params, name, cwd):
-        time.sleep(1)
+        deciding.set()
+        stopped.wait(5)
         return allowed(params, name, cwd)
 
     monkeypatch.setattr(harness.session_mod, "permission_outcome", slow)
     client = harness.client()
     thread, _ = _turn_in_thread(harness, client, "PERMISSION " + json.dumps({"name": "Bash", "command": "echo hi"}))
-    _wait_for_prompt(harness)
-    time.sleep(0.3)
+    # The stop lands while the gate decides, not before it starts.
+    assert deciding.wait(10), "the gate never ran"
     client.cancel()
+    stopped.set()
     thread.join(5)
     deadline = time.monotonic() + 10
     while not harness.requests("_permission_answer"):
