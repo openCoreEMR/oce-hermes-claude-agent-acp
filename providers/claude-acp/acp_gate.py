@@ -115,6 +115,15 @@ def permission_outcome(params: dict[str, Any], name: str, cwd: str) -> dict[str,
     except Exception:
         logger.exception("claude-acp permission check failed; refusing")
         allowed, why = False, "the check failed"
+    return _outcome(params, allowed, why)
+
+
+def stopped_outcome(params: dict[str, Any]) -> dict[str, Any]:
+    """Refuse a tool call that Claude Code asks for after Hermes stopped the turn."""
+    return _outcome(params, False, "the turn was stopped")
+
+
+def _outcome(params: dict[str, Any], allowed: bool, why: str) -> dict[str, Any]:
     logger.info("claude-acp permission %s: %s", "allowed" if allowed else "refused", why[:200])
     option_id = _option_id(params.get("options"), "allow_once" if allowed else "reject_once")
     if option_id is None:

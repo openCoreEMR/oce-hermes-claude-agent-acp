@@ -11,6 +11,8 @@ line-delimited JSON-RPC on stdio and records each request in the file named by
 ``PERMISSION <json>``  ask for this tool call's permission, then report the outcome.
 ``CHILD <seconds>``  start a process tree, wait for a cancel, and leave the tree running.
 ``BETWEEN <text>``  finish the turn, then write text with no prompt in flight.
+``WAKE <json>``  wait for a cancel, then ask for this tool call's permission with
+                 no prompt in flight, as a background task's notification does.
 ``TOOLCALL``     reply with a Hermes tool call in text form.
 ``TOOLONG``      fail the prompt with Claude Code's context error.
 ``EMPTY``        end the turn with no text.
@@ -117,6 +119,11 @@ def run_prompt(request_id, session_id, text):
         log({"method": "_child", "child": child.pid})
         canceled.wait()
         send({"id": request_id, "result": {"stopReason": "cancelled"}})
+    elif command == "WAKE":
+        canceled.wait()
+        send({"id": request_id, "result": {"stopReason": "cancelled"}})
+        time.sleep(0.2)
+        log({"method": "_wake", "answer": ask_permission(session_id, json.loads(rest))})
     elif command == "BETWEEN":
         settle(request_id, session_id, "turn done")
         time.sleep(0.2)

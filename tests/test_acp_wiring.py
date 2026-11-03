@@ -347,6 +347,21 @@ def test_cancel_ends_what_the_turn_started_and_spares_claude_code(harness):
     assert direct.is_running()
 
 
+def test_a_tool_call_claude_code_starts_after_a_stop_is_refused_until_the_next_prompt(harness):
+    client = harness.client()
+    thread, _ = _turn_in_thread(harness, client, "WAKE " + json.dumps({"name": "Bash", "command": "echo hi"}))
+    _wait_for_prompt(harness)
+    client.cancel()
+    thread.join(5)
+    deadline = time.monotonic() + 10
+    while not harness.requests("_wake"):
+        assert time.monotonic() < deadline, "the fake agent never asked"
+        time.sleep(0.02)
+    assert harness.requests("_wake")[0]["answer"]["outcome"] == {"outcome": "selected", "optionId": "reject"}
+    assert len(harness.requests("session/cancel")) == 2
+    assert _permission(harness, {"name": "Bash", "command": "echo hi"})["optionId"] == "allow-once"
+
+
 def test_a_report_quotes_the_running_tool_call_when_there_is_no_text(harness, tmp_path):
     client = harness.client()
     thread, outcome = _turn_in_thread(harness, client, "HANG")
