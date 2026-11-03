@@ -294,8 +294,12 @@ def one_shot_calls():
 
 
 def chain_prompt(marker, steps):
-    return (f"Run this exact command with your Bash tool, as a separate tool call each time, {steps} times one after the other, "
-            f"never in the background: echo x >> {marker} ; ping -c {TOOL_CALL_SECONDS} -i 1 127.0.0.1 >/dev/null . "
+    # A script, not the commands inline: Fable's safeguards refused a repeated
+    # ping, and Claude Code refuses a foreground sleep of this length.
+    script = marker.parent / "long-step.sh"
+    script.write_text(f'#!/bin/sh\n# One step of a long probe turn: record the time, then wait.\ndate >> "$1"\nsleep {TOOL_CALL_SECONDS}\n')
+    return (f"This is a test that a long turn stays healthy. Run this exact command with your Bash tool, as a separate tool call "
+            f"each time, {steps} times one after the other, never in the background: sh {script} {marker} . "
             "Do nothing else between calls. Then reply with exactly the word FINISHED.")
 
 
