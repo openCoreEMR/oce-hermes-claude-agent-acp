@@ -156,7 +156,11 @@ class AdapterSession:
         self._prompt_settled = threading.Event()
         self._prompt_settled.set()
         self._turn: Turn | None = None
+        # A stop, the permission answers that follow it, and the next prompt
+        # are ordered by this lock. ``_stops`` tells an answer a stop came.
+        self._stop_lock = threading.Lock()
         self._stopped = False
+        self._stops = 0
         self._drop_updates_until = 0.0
         self._dropping = False
         self._between_lock = threading.Lock()
@@ -289,20 +293,32 @@ class AdapterSession:
     def _answer(self, message: dict[str, Any]) -> None:
         method = message.get("method")
         response: dict[str, Any] = {"jsonrpc": "2.0", "id": message.get("id")}
-        if method == "session/request_permission" and self._stopped:
-            # A background task that ends after a stop wakes Claude Code, and
-            # it picks up the stopped plan on its own. Nothing runs until
-            # Hermes sends another prompt.
-            response["result"] = stopped_outcome(message.get("params") or {})
-            self._write({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": self.acp_id}})
-        elif method == "session/request_permission":
-            params = message.get("params") or {}
+        if method != "session/request_permission":
+            response["error"] = {"code": -32601, "message": f"Hermes does not implement {method}."}
+            self._write(response)
+            return
+        params = message.get("params") or {}
+        stops = self._stops
+        outcome = None
+        if not self._stopped:
             tool_call = params.get("toolCall")
             call_id = tool_call.get("toolCallId") if isinstance(tool_call, dict) else None
-            response["result"] = permission_outcome(params, self._tool_names.get(str(call_id), ""), self.launch.cwd)
-        else:
-            response["error"] = {"code": -32601, "message": f"Hermes does not implement {method}."}
-        self._write(response)
+            outcome = permission_outcome(params, self._tool_names.get(str(call_id), ""), self.launch.cwd)
+        with self._stop_lock:
+            # A background task that ends after a stop wakes Claude Code, and
+            # it picks up the stopped plan on its own. Nothing runs until
+            # Hermes sends another prompt, including a call the gate allowed
+            # while the stop came.
+            if outcome is None or self._stopped or self._stops != stops:
+                outcome = stopped_outcome(params)
+                cancel = self._stopped
+            else:
+                cancel = False
+            response["result"] = outcome
+            self._write(response)
+            # Only while the stop stands: the next prompt is on the wire once it clears.
+            if cancel:
+                self._write({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": self.acp_id}})
 
     def _write(self, payload: dict[str, Any]) -> None:
         proc = self.proc
@@ -611,11 +627,12 @@ class AdapterSession:
             turn.prompt_sent = True
             turn.started_at = time.time()
             self._turn = turn
-            self._stopped = False
             # Replay stragglers end here: what follows is this prompt's reply.
             self._drop_updates_until = 0.0
             self._prompt_settled.clear()
-            request_id, reply = self._send_request("session/prompt", prompt, is_prompt=True)
+            with self._stop_lock:
+                self._stopped = False
+                request_id, reply = self._send_request("session/prompt", prompt, is_prompt=True)
         try:
             response = self._await_prompt(turn, reply, timeout)
         finally:
@@ -672,9 +689,11 @@ class AdapterSession:
 
     def stop_turn(self, turn: Turn) -> None:
         """Send ``session/cancel`` and make sure the turn's processes end. Never blocks the caller."""
-        self._stopped = True
-        self._dropping = True
-        self._write({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": self.acp_id}})
+        with self._stop_lock:
+            self._stopped = True
+            self._stops += 1
+            self._dropping = True
+            self._write({"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": self.acp_id}})
         threading.Thread(target=self._reap, args=(turn,), daemon=True, name="claude-acp-reap").start()
 
     def _reap(self, turn: Turn) -> None:

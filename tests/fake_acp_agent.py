@@ -88,6 +88,7 @@ def ask_permission(session_id, spec):
         ],
     }})
     done.wait(30)
+    log({"method": "_permission_answer", "answer": answers.get(request_id, {})})
     return answers.get(request_id, {})
 
 

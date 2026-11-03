@@ -362,6 +362,27 @@ def test_a_tool_call_claude_code_starts_after_a_stop_is_refused_until_the_next_p
     assert _permission(harness, {"name": "Bash", "command": "echo hi"})["optionId"] == "allow-once"
 
 
+def test_a_tool_call_the_gate_allows_while_the_turn_is_stopped_is_refused(harness, monkeypatch):
+    allowed = harness.session_mod.permission_outcome
+
+    def slow(params, name, cwd):
+        time.sleep(1)
+        return allowed(params, name, cwd)
+
+    monkeypatch.setattr(harness.session_mod, "permission_outcome", slow)
+    client = harness.client()
+    thread, _ = _turn_in_thread(harness, client, "PERMISSION " + json.dumps({"name": "Bash", "command": "echo hi"}))
+    _wait_for_prompt(harness)
+    time.sleep(0.3)
+    client.cancel()
+    thread.join(5)
+    deadline = time.monotonic() + 10
+    while not harness.requests("_permission_answer"):
+        assert time.monotonic() < deadline, "the session never answered"
+        time.sleep(0.02)
+    assert harness.requests("_permission_answer")[0]["answer"]["outcome"] == {"outcome": "selected", "optionId": "reject"}
+
+
 def test_a_report_quotes_the_running_tool_call_when_there_is_no_text(harness, tmp_path):
     client = harness.client()
     thread, outcome = _turn_in_thread(harness, client, "HANG")
