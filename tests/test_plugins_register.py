@@ -42,29 +42,47 @@ def _plugin_dirs():
 
 @pytest.mark.parametrize("plugin_dir", _plugin_dirs(), ids=lambda p: p.name)
 def test_plugin_registers_provider_and_agent(plugin_dir):
-    from agent.acp_agent_registry import ACP_AGENT_REGISTRY, get_agent_entry
     from providers import _REGISTRY as provider_registry  # type: ignore[attr-defined]
 
     name = plugin_dir.name  # e.g. "claude-acp"
     agent_name = name.removesuffix("-acp")
 
     module_name = f"_hermes_acp_agents_test_{agent_name}"
-    spec = importlib.util.spec_from_file_location(module_name, plugin_dir / "__init__.py")
+    spec = importlib.util.spec_from_file_location(
+            module_name,
+            plugin_dir / "__init__.py",
+            # Mirror core's loader (providers/__init__.py): plugins are
+            # packages, so vendored sibling modules import relatively.
+            submodule_search_locations=[str(plugin_dir)],
+        )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
+    vendored_registry = None
     try:
         spec.loader.exec_module(module)
+        # A seam-era plugin vendors its own agent registry as a sibling
+        # module; a legacy plugin registers into core's (branch-only) one.
+        vendored_registry = sys.modules.get(module_name + ".acp_agent_registry")
     finally:
-        sys.modules.pop(module_name, None)
+        for suffix in ("", ".acp_agent_registry", ".acp_client"):
+            sys.modules.pop(module_name + suffix, None)
 
     assert name in provider_registry, f"{name} did not call register_provider()"
     profile = provider_registry[name]
     assert profile.auth_type == "external_process"
     assert profile.base_url == f"acp://{agent_name}"
 
-    assert agent_name in ACP_AGENT_REGISTRY, f"{agent_name} did not call register_acp_agent()"
-    entry = get_agent_entry(agent_name)
+    if vendored_registry is not None:
+        registry = vendored_registry.ACP_AGENT_REGISTRY
+        get_entry = vendored_registry.get_agent_entry
+    else:
+        from agent.acp_agent_registry import (
+            ACP_AGENT_REGISTRY as registry,
+            get_agent_entry as get_entry,
+        )
+    assert agent_name in registry, f"{agent_name} did not call register_acp_agent()"
+    entry = get_entry(agent_name)
     assert entry and entry.command
     assert entry.display_name
     assert entry.install_hint

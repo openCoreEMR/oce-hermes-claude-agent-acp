@@ -1,5 +1,5 @@
-name: claude-acp-provider
+name: oce-claude-agent-acp
 kind: model-provider
 version: 1.0.0
-description: Claude Code via ACP subprocess (generalized ACP client, issue #5257)
+description: Claude Code via one long-lived ACP adapter per Hermes session
 author: hermes-acp-agents contributors
